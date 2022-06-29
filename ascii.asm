@@ -18,7 +18,7 @@ CODE SEGMENT
 MAIN:
 	MOV AX,DATA					 		; AX, Accumulator; 
 	MOV DS,AX 							; DS, Data
-	MOV DX,OFFSET MSG						; 
+	MOV DX,OFFSET MSG						 
 
 	MOV AH,9							; AH=9 - output of a string at DS:DX. String must be terminated by '$'
 	INT 21H								; output string
@@ -52,7 +52,7 @@ MAIN:
 			INT 21H	
 			
 		printLow:	
-			AND BH, 00001111b				; isolate rightmost hex digit
+			AND BH, 00001111b			; isolate rightmost hex digit
 			push BX
 			SUB BH, 10
 			JB printLow0to9
