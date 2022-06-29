@@ -52,7 +52,7 @@ MAIN:
 			INT 21H	
 			
 		printLow:	
-			AND BH, 00001111b			; isolate rightmost hex digit
+			AND BH, 00001111b				; isolate rightmost hex digit
 			push BX
 			SUB BH, 10
 			JB printLow0to9
