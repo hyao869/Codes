@@ -41,7 +41,7 @@ MAIN:
 			POP CX
 
 			push AX
-			SUB AL, 10				; 0aH
+			SUB AL, 10			    ; 0aH
 			JB printHigh0to9
 		
 		printHighAtoF:
