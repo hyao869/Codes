@@ -1,0 +1,212 @@
+#include <SoftwareSerial.h>
+#include <ESP8266WiFi.h>
+#include <PubSubClient.h>
+
+SoftwareSerial newSP(4, 5);      //1st parameter RX, 2nd parameter TX
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+
+const char* ssid = "***********";        //"wifiname"
+const char* password = "**********";     //"psw"
+
+const char* mqtt_server = "m15.cloudmqtt.com";       //IPAddress mqtt_server = (192, 168, 1, 78);     "broker.mqtt-dashboard.com";
+const char* mqttUser = "fhfoqkqu";
+const char* mqttPassword = "QdhOFQNFTooE";
+
+//variables
+String MAC = WiFi.macAddress();
+const byte numChars = 70;       // bytes limit
+char receivedChars[numChars];   // an array to store the received data
+boolean newData = false;
+//control CMD
+byte autoMode[] = {0x01, 0x6F, 0x1A};
+byte manualMode[] = {0x01, 0x6F, 0x3C};
+byte rstMode[] = {0x01, 0x6F, 0x5E};
+
+byte win[] = {0x01, 0x33, 0x00};
+
+//0- fan1 61, 1- fan2 62, 2- shade1 71, 3- shade2 72, 4- light1 81, 5- light2 82, 6- co2 91, 7- heater 92
+byte eqptIndex[] = {0x3D, 0x3E, 0x47, 0x48, 0x51, 0x52, 0x5B, 0x5C};
+
+byte ftgAuto[11];
+byte ftgSemi[13];
+byte ftgManual[9];
+
+void setup_wifi() {
+
+  delay(10);
+  // We start by connecting to a WiFi network
+  Serial.println();
+  Serial.print("Connecting to ");
+  Serial.println(ssid);
+
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  randomSeed(micros());
+
+  Serial.println("");
+  Serial.println("WiFi connected");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+}
+
+//MQTT connection
+void reconnect() {
+  // Loop until reconnected
+  while (!client.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    
+    //String clientId = "nodeMCU-H0123";            
+    //clientId += String(random(0xffff), HEX);
+    
+    // Attempt to connect
+    if (client.connect("nodeMCU-H0123", mqttUser, mqttPassword)) {
+      Serial.println("connected");
+      // Once connected, publish an announcement, and subscribe
+      client.publish("MAC", (char*) MAC.c_str());   //only once
+      client.subscribe("rpi");
+      client.subscribe("mode"); 
+      client.subscribe("window");  
+      client.subscribe("eqpt"); 
+      client.subscribe("FTG");     
+    } else {
+      /*
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 10 seconds");
+      */
+      // Wait 10 seconds before retrying
+      delay(10000);
+    }
+  }
+}
+
+//Mqtt callback
+void MQTTcallback(char* topic, byte* payload, unsigned int length) {
+  //Serial.print("Message arrived in topic: ");     
+  //Serial.println(topic);
+  char buffer[15];    
+  String msg;     //most pkts are small, but fertigation mode params setting is long, especially the semi-auto
+  if (strcmp("mode", topic) == 0) {    
+    for (int i = 0; i < length; i++) {                  //can be simplified here, as only payload[0] been used to differentiate the mode
+      buffer[i] = (char)payload[i];
+      //Serial.print(buffer[i]);
+    }  
+    //Serial.print("Selected mode: ");   
+    if (buffer[0] == 'A'){                                //if (strcmp ("Auto", buffer) == 0){
+        Serial1.write(autoMode, sizeof(autoMode));       //not ok; cmd send to API, here, not receive
+    }else if (buffer[0] == 'M'){
+        Serial1.write(manualMode, sizeof(manualMode));   //ok
+    }else if (buffer[0] == 'R'){
+        Serial1.write(rstMode, sizeof(rstMode));         //ok
+    }else{
+       //Serial.println("mode string error");
+    }
+  }
+  else if (strcmp("window", topic) == 0) {
+    for (int i = 0; i < length; i++) {
+      msg = msg + (char)payload[i];       //convert *byte to String
+    } 
+    //Serial.print("Turning window");
+    //Serial.println(msg.toInt());
+    win[2] = msg.toInt();
+    Serial1.write(win, sizeof(win));       //Serial.write(0x45);   // will write 0100 0101 to the cable
+
+  }
+  else if (strcmp("eqpt", topic) == 0) {
+    byte eqptCtrl[] = {0x01, 0x00, 0x3A};       //default close
+    eqptCtrl[1] = eqptIndex[payload[0] - '0'];
+    char state = (char)payload[1];  
+    if (state == '1'){
+      eqptCtrl[2] = 0x5B;
+    }
+    Serial1.write(eqptCtrl, sizeof(eqptCtrl)); 
+  }
+  else if(strcmp("FTG", topic) == 0){
+    //Serial.println("inside FTG topic");
+    for (int i = 0; i < length; i++) {
+      msg = msg + (char)payload[i];        //convert *byte to String
+    }  
+    //Serial.println(); 
+    //Serial.print("FTG MSG : ");
+    //Serial.println(msg); 
+    
+    String trimmed =  msg.substring(1, msg.length() - 1) + ",";
+    
+    byte ftgMode[13];            //byte ftgMode[length];
+    int arr[11], p = 0, t = 0; 
+    for (int i = 0; i < trimmed.length(); i++){ 
+       if(trimmed.charAt(i) == ','){ 
+          ftgMode[t] = trimmed.substring(p, i).toInt(); 
+          p = (i + 1); 
+          t++; 
+        }
+    }
+    Serial1.write(ftgMode, sizeof(ftgMode));
+         
+  }    
+  else {
+    
+    Serial.print("Unknown topic >> ");
+    Serial.print(topic);
+    Serial.println();
+    
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  Serial1.begin(115200); 
+  newSP.begin(115200);
+  
+  setup_wifi();
+  client.setServer(mqtt_server, 17211);
+  client.setCallback(MQTTcallback);
+}
+
+void loop() {
+  if (!client.connected()) {
+    reconnect();
+  }
+  recvWithEndMarker();
+  publishNewData();  
+  client.loop();  
+}
+
+void recvWithEndMarker() {
+   static byte ndx = 0;
+   char endMarker = '\r\n';
+   char rc;
+ 
+   // if (Serial.available() > 0) {
+   while (newSP.available() > 0 && newData == false) {    
+       rc = newSP.read();
+  
+       if (rc != endMarker) {
+           receivedChars[ndx] = rc;
+           ndx++;
+           if (ndx >= numChars) {
+              ndx = numChars - 1;
+           }
+       }else {
+           receivedChars[ndx] = '\0'; // terminate the string
+           ndx = 0;
+           newData = true;
+       }
+   }
+}
+
+void publishNewData() {
+   if (newData == true) {
+       //newSP.print("newSP: ");
+       client.publish("api-engine", receivedChars);
+       Serial.println(receivedChars);
+       newData = false;
+   }
+}
